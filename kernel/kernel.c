@@ -16,6 +16,12 @@ static inline void outb(unsigned short port, unsigned char val) {
     __asm__ __volatile__("outb %0, %1" : : "a"(val), "Nd"(port));
 }
 
+extern void mem_init();
+extern void *malloc(unsigned int size);
+extern void free(void *ptr);
+extern unsigned int mem_used();
+extern unsigned int mem_free();
+
 void clear_screen() {
     for (int i = 0; i < 80 * 25; i++)
         vga[i] = 0x0720;
@@ -71,20 +77,17 @@ void update_clock() {
     unsigned int hours   = minutes / 60;
     seconds %= 60;
     minutes %= 60;
-
-    // Display clock top right
-    print_int(hours,   0, 68, 0x0B);
-    print_at(":",      0, 70, 0x0B);
-    print_int(minutes, 0, 71, 0x0B);
-    print_at(":",      0, 73, 0x0B);
-    print_int(seconds, 0, 74, 0x0B);
+    print_at("        ", 0, 68, 0x0B);
+    print_int(hours,    0, 68, 0x0B);
+    print_at(":",       0, 70, 0x0B);
+    print_int(minutes,  0, 71, 0x0B);
+    print_at(":",       0, 73, 0x0B);
+    print_int(seconds,  0, 74, 0x0B);
 }
 
-// Called by timer interrupt
 void timer_handler() {
     ticks++;
     update_clock();
-    // Send End Of Interrupt to PIC
     outb(0x20, 0x20);
 }
 
@@ -94,7 +97,7 @@ void handle_command() {
     if (cur_row >= 25) scroll();
 
     if (strcmp(cmd_buf, "help") == 0) {
-        print_line("  Commands: help, clear, about, hello, time", 0x0B);
+        print_line("  Commands: help, clear, about, hello, time, mem", 0x0B);
     } else if (strcmp(cmd_buf, "clear") == 0) {
         clear_screen();
         print_at("=== MyOS v0.1 - Built by Noah & Claude ===", 0, 0, 0x0A);
@@ -108,10 +111,18 @@ void handle_command() {
     } else if (strcmp(cmd_buf, "hello") == 0) {
         print_line("  Hello Noah! Your OS is alive!", 0x0E);
     } else if (strcmp(cmd_buf, "time") == 0) {
-        unsigned int seconds = ticks / 100;
         print_at("  Uptime: ", cur_row, 0, 0x0B);
-        print_int(seconds, cur_row, 9, 0x0B);
-        print_at(" seconds", cur_row, 12, 0x0B);
+        print_int(ticks / 100, cur_row, 9, 0x0B);
+        print_at(" seconds  ", cur_row, 12, 0x0B);
+        cur_row++;
+    } else if (strcmp(cmd_buf, "mem") == 0) {
+        print_at("  Memory used: ", cur_row, 0, 0x0E);
+        print_int(mem_used(), cur_row, 15, 0x0E);
+        print_at(" bytes  ", cur_row, 22, 0x0E);
+        cur_row++;
+        print_at("  Memory free: ", cur_row, 0, 0x0A);
+        print_int(mem_free(), cur_row, 15, 0x0A);
+        print_at(" bytes  ", cur_row, 22, 0x0A);
         cur_row++;
     } else if (cmd_len > 0) {
         print_at("  Unknown: ", cur_row, 0, 0x0C);
@@ -136,7 +147,41 @@ const char scanmap_upper[] = {
     'Z','X','C','V','B','N','M','<','>','?',0,'*',0,' '
 };
 
-// IDT setup
+void keyboard_handler() {
+    unsigned char sc = inb(0x60);
+
+    if (sc == 0x2A || sc == 0x36) { shift_pressed = 1; outb(0x20, 0x20); return; }
+    if (sc == 0xAA || sc == 0xB6) { shift_pressed = 0; outb(0x20, 0x20); return; }
+    if (sc & 0x80) { outb(0x20, 0x20); return; }
+
+    if (sc == 0x0E) {
+        if (cmd_len > 0) {
+            cmd_len--;
+            cur_col--;
+            vga[cur_row * 80 + cur_col] = (unsigned short)(0x0F00 | ' ');
+        }
+        outb(0x20, 0x20);
+        return;
+    }
+
+    if (sc == 0x1C) {
+        handle_command();
+        outb(0x20, 0x20);
+        return;
+    }
+
+    if (sc < sizeof(scanmap_lower)) {
+        char c = shift_pressed ? scanmap_upper[sc] : scanmap_lower[sc];
+        if (c && cmd_len < 78) {
+            cmd_buf[cmd_len++] = c;
+            vga[cur_row * 80 + cur_col] = (unsigned short)(0x0F00 | c);
+            cur_col++;
+        }
+    }
+
+    outb(0x20, 0x20);
+}
+
 struct idt_entry {
     unsigned short base_low;
     unsigned short sel;
@@ -154,6 +199,7 @@ struct idt_entry idt[256];
 struct idt_ptr idtp;
 
 extern void timer_isr();
+extern void keyboard_isr();
 extern void load_idt(struct idt_ptr *);
 
 void idt_set(unsigned char num, unsigned int base) {
@@ -167,22 +213,17 @@ void idt_set(unsigned char num, unsigned int base) {
 void init_idt() {
     idtp.limit = sizeof(idt) - 1;
     idtp.base  = (unsigned int)&idt;
-
-    // Remap PIC
     outb(0x20, 0x11); outb(0xA0, 0x11);
     outb(0x21, 0x20); outb(0xA1, 0x28);
     outb(0x21, 0x04); outb(0xA1, 0x02);
     outb(0x21, 0x01); outb(0xA1, 0x01);
     outb(0x21, 0x00); outb(0xA1, 0x00);
-
-    // Set timer interrupt (IRQ0 = interrupt 32)
     idt_set(32, (unsigned int)timer_isr);
-
+    idt_set(33, (unsigned int)keyboard_isr);
     load_idt(&idtp);
 }
 
 void init_timer() {
-    // Set PIT to 100Hz
     unsigned int divisor = 1193180 / 100;
     outb(0x43, 0x36);
     outb(0x40, divisor & 0xFF);
@@ -196,41 +237,15 @@ void kernel_main() {
     print_at("------------------------------------------", 2, 0, 0x08);
     print_at("  Type 'help' for commands                ", 3, 0, 0x08);
 
+    mem_init();
     init_idt();
     init_timer();
-
-    // Enable interrupts
     __asm__ __volatile__("sti");
 
     new_prompt();
 
+    // Just halt and wait for interrupts
     while (1) {
-        while (!(inb(0x64) & 1));
-        unsigned char sc = inb(0x60);
-
-        if (sc == 0x2A || sc == 0x36) { shift_pressed = 1; continue; }
-        if (sc == 0xAA || sc == 0xB6) { shift_pressed = 0; continue; }
-        if (sc & 0x80) continue;
-
-        if (sc == 0x0E) {
-            if (cmd_len > 0) {
-                cmd_len--;
-                cur_col--;
-                vga[cur_row * 80 + cur_col] = (unsigned short)(0x0F00 | ' ');
-            }
-            continue;
-        }
-
-        if (sc == 0x1C) { handle_command(); continue; }
-
-        if (sc >= sizeof(scanmap_lower)) continue;
-        char c = shift_pressed ? scanmap_upper[sc] : scanmap_lower[sc];
-        if (c == 0) continue;
-
-        if (cmd_len < 78) {
-            cmd_buf[cmd_len++] = c;
-            vga[cur_row * 80 + cur_col] = (unsigned short)(0x0F00 | c);
-            cur_col++;
-        }
+        __asm__ __volatile__("hlt");
     }
 }

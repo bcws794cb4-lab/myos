@@ -12,12 +12,15 @@ kernel/interrupts.o: kernel/interrupts.asm
 kernel/kernel.o: kernel/kernel.c
 	x86_64-elf-gcc -m32 -ffreestanding -fno-stack-protector -nostdlib -c kernel/kernel.c -o kernel/kernel.o
 
-kernel/kernel.bin: kernel/entry.o kernel/interrupts.o kernel/kernel.o
-	x86_64-elf-ld -m elf_i386 -Ttext 0x8000 --oformat binary -o kernel/kernel.bin kernel/entry.o kernel/interrupts.o kernel/kernel.o
+kernel/memory.o: kernel/memory.c
+	x86_64-elf-gcc -m32 -ffreestanding -fno-stack-protector -nostdlib -c kernel/memory.c -o kernel/memory.o
+
+kernel/kernel.bin: kernel/entry.o kernel/interrupts.o kernel/kernel.o kernel/memory.o
+	x86_64-elf-ld -m elf_i386 -Ttext 0x8000 --oformat binary -o kernel/kernel.bin kernel/entry.o kernel/interrupts.o kernel/kernel.o kernel/memory.o
 
 myos.img: boot/boot.bin kernel/kernel.bin
 	cat boot/boot.bin kernel/kernel.bin > myos.img
 	truncate -s 1440k myos.img
 
 clean:
-	rm -f boot/boot.bin kernel/entry.o kernel/interrupts.o kernel/kernel.o kernel/kernel.bin myos.img
+	rm -f boot/boot.bin kernel/entry.o kernel/interrupts.o kernel/kernel.o kernel/memory.o kernel/kernel.bin myos.img
