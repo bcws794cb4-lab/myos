@@ -21,7 +21,7 @@ start:
 .done:
 
     mov ah, 0x02
-    mov al, 15
+    mov al, 50
     mov ch, 0
     mov cl, 2
     mov dh, 0

@@ -22,6 +22,14 @@ extern void free(void *ptr);
 extern unsigned int mem_used();
 extern unsigned int mem_free();
 
+extern void fs_init();
+extern int fs_create(const char *name);
+extern int fs_write(const char *name, const char *data);
+extern const char *fs_read(const char *name);
+extern int fs_delete(const char *name);
+extern int fs_list(char out[][32], unsigned int sizes[], int max);
+extern int fs_file_count();
+
 void clear_screen() {
     for (int i = 0; i < 80 * 25; i++)
         vga[i] = 0x0720;
@@ -71,6 +79,20 @@ int strcmp(const char *a, const char *b) {
     return *a - *b;
 }
 
+int strncmp(const char *a, const char *b, int n) {
+    for (int i = 0; i < n; i++) {
+        if (a[i] != b[i]) return a[i] - b[i];
+        if (!a[i]) return 0;
+    }
+    return 0;
+}
+
+int strlen(const char *s) {
+    int i = 0;
+    while (s[i]) i++;
+    return i;
+}
+
 void update_clock() {
     unsigned int seconds = ticks / 100;
     unsigned int minutes = seconds / 60;
@@ -97,33 +119,98 @@ void handle_command() {
     if (cur_row >= 25) scroll();
 
     if (strcmp(cmd_buf, "help") == 0) {
-        print_line("  Commands: help, clear, about, hello, time, mem", 0x0B);
+        print_line("  Commands: help, clear, about, hello,", 0x0B);
+        print_line("            time, mem, ls, touch, read,", 0x0B);
+        print_line("            write, rm", 0x0B);
+
     } else if (strcmp(cmd_buf, "clear") == 0) {
         clear_screen();
         print_at("=== MyOS v0.1 - Built by Noah & Claude ===", 0, 0, 0x0A);
         print_at("------------------------------------------", 2, 0, 0x08);
         print_at("  Type 'help' for commands                ", 3, 0, 0x08);
         cur_row = 4;
+
     } else if (strcmp(cmd_buf, "about") == 0) {
         print_line("  MyOS v0.1 - Built by Noah & Claude", 0x0D);
         print_line("  Written in C and Assembly", 0x0D);
         print_line("  Running on x86 32-bit protected mode", 0x0D);
+
     } else if (strcmp(cmd_buf, "hello") == 0) {
         print_line("  Hello Noah! Your OS is alive!", 0x0E);
+
     } else if (strcmp(cmd_buf, "time") == 0) {
         print_at("  Uptime: ", cur_row, 0, 0x0B);
         print_int(ticks / 100, cur_row, 9, 0x0B);
         print_at(" seconds  ", cur_row, 12, 0x0B);
         cur_row++;
+
     } else if (strcmp(cmd_buf, "mem") == 0) {
-        print_at("  Memory used: ", cur_row, 0, 0x0E);
-        print_int(mem_used(), cur_row, 15, 0x0E);
-        print_at(" bytes  ", cur_row, 22, 0x0E);
+        print_at("  Used: ", cur_row, 0, 0x0E);
+        print_int(mem_used(), cur_row, 8, 0x0E);
+        print_at(" bytes   Free: ", cur_row, 14, 0x0A);
+        print_int(mem_free(), cur_row, 29, 0x0A);
+        print_at(" bytes  ", cur_row, 35, 0x0A);
         cur_row++;
-        print_at("  Memory free: ", cur_row, 0, 0x0A);
-        print_int(mem_free(), cur_row, 15, 0x0A);
-        print_at(" bytes  ", cur_row, 22, 0x0A);
-        cur_row++;
+
+    } else if (strcmp(cmd_buf, "ls") == 0) {
+        char names[32][32];
+        unsigned int sizes[32];
+        int count = fs_list(names, sizes, 32);
+        if (count == 0) {
+            print_line("  No files found.", 0x08);
+        } else {
+            for (int i = 0; i < count; i++) {
+                print_at("  ", cur_row, 0, 0x0F);
+                print_at(names[i], cur_row, 2, 0x0F);
+                print_at("  ", cur_row, 2 + strlen(names[i]), 0x08);
+                print_int(sizes[i], cur_row, 4 + strlen(names[i]), 0x08);
+                print_at(" bytes", cur_row, 10 + strlen(names[i]), 0x08);
+                cur_row++;
+                if (cur_row >= 25) scroll();
+            }
+        }
+
+    } else if (strncmp(cmd_buf, "touch ", 6) == 0) {
+        char *name = cmd_buf + 6;
+        if (fs_create(name) >= 0)
+            print_line("  File created.", 0x0A);
+        else
+            print_line("  Error: file exists or no space.", 0x0C);
+
+    } else if (strncmp(cmd_buf, "rm ", 3) == 0) {
+        char *name = cmd_buf + 3;
+        if (fs_delete(name) == 0)
+            print_line("  File deleted.", 0x0A);
+        else
+            print_line("  Error: file not found.", 0x0C);
+
+    } else if (strncmp(cmd_buf, "read ", 5) == 0) {
+        char *name = cmd_buf + 5;
+        const char *data = fs_read(name);
+        if (data) {
+            print_at("  ", cur_row, 0, 0x0F);
+            print_at(data, cur_row, 2, 0x0F);
+            cur_row++;
+        } else {
+            print_line("  Error: file not found.", 0x0C);
+        }
+
+    } else if (strncmp(cmd_buf, "write ", 6) == 0) {
+        // Format: write filename content
+        char *rest = cmd_buf + 6;
+        char name[32];
+        int ni = 0;
+        while (rest[ni] && rest[ni] != ' ' && ni < 31) {
+            name[ni] = rest[ni];
+            ni++;
+        }
+        name[ni] = 0;
+        char *content = rest + ni + 1;
+        if (fs_write(name, content) >= 0)
+            print_line("  File written.", 0x0A);
+        else
+            print_line("  Error: file not found. Use touch first.", 0x0C);
+
     } else if (cmd_len > 0) {
         print_at("  Unknown: ", cur_row, 0, 0x0C);
         print_at(cmd_buf, cur_row, 10, 0x0C);
@@ -178,7 +265,6 @@ void keyboard_handler() {
             cur_col++;
         }
     }
-
     outb(0x20, 0x20);
 }
 
@@ -238,13 +324,17 @@ void kernel_main() {
     print_at("  Type 'help' for commands                ", 3, 0, 0x08);
 
     mem_init();
+    fs_init();
     init_idt();
     init_timer();
     __asm__ __volatile__("sti");
 
+    // Create a welcome file by default
+    fs_create("readme.txt");
+    fs_write("readme.txt", "Welcome to MyOS! Built by Noah and Claude.");
+
     new_prompt();
 
-    // Just halt and wait for interrupts
     while (1) {
         __asm__ __volatile__("hlt");
     }
