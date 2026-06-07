@@ -20,13 +20,13 @@ start:
     jmp .loop
 .done:
 
-    ; Switch to Mode 13h (320x200, 256 colors)
+    ; Switch to Mode 13h
     mov ax, 0x0013
     int 0x10
 
-    ; Load kernel
+    ; Load kernel - 80 sectors now
     mov ah, 0x02
-    mov al, 50
+    mov al, 80
     mov ch, 0
     mov cl, 2
     mov dh, 0
