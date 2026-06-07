@@ -148,3 +148,36 @@ void gfx_update_clock(unsigned int ticks) {
     time[5] = 0;
     draw_string(SCREEN_WIDTH - 40, SCREEN_HEIGHT - 10, time, WHITE, GRAY);
 }
+
+// Saved pixels under cursor
+static uint8_t saved[5][3];
+
+void clear_cursor(int x, int y) {
+    // Restore saved pixels
+    for (int row = 0; row < 5; row++)
+        for (int col = 0; col < 3; col++)
+            put_pixel(x + col, y + row, saved[row][col]);
+}
+
+void draw_cursor(int x, int y) {
+    uint8_t *fb = (uint8_t *)FRAMEBUFFER;
+    // Save pixels under cursor
+    for (int row = 0; row < 5; row++)
+        for (int col = 0; col < 3; col++) {
+            int px = x + col, py = y + row;
+            if (px >= 0 && px < SCREEN_WIDTH && py >= 0 && py < SCREEN_HEIGHT)
+                saved[row][col] = fb[py * SCREEN_WIDTH + px];
+            else
+                saved[row][col] = 0;
+        }
+
+    // Draw arrow cursor
+    put_pixel(x,   y,   WHITE);
+    put_pixel(x,   y+1, WHITE);
+    put_pixel(x,   y+2, WHITE);
+    put_pixel(x,   y+3, WHITE);
+    put_pixel(x,   y+4, WHITE);
+    put_pixel(x+1, y+1, WHITE);
+    put_pixel(x+2, y+2, WHITE);
+    put_pixel(x+1, y,   WHITE);
+}

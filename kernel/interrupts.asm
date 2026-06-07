@@ -1,9 +1,11 @@
 bits 32
 global timer_isr
 global keyboard_isr
+global mouse_isr
 global load_idt
 extern timer_handler
 extern keyboard_handler
+extern mouse_handler
 
 timer_isr:
     pusha
@@ -14,6 +16,12 @@ timer_isr:
 keyboard_isr:
     pusha
     call keyboard_handler
+    popa
+    iret
+
+mouse_isr:
+    pusha
+    call mouse_handler
     popa
     iret
 

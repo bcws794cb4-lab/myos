@@ -16,6 +16,8 @@ extern void task_init();
 extern void task_switch();
 extern void draw_desktop();
 extern void gfx_update_clock(unsigned int ticks);
+extern void mouse_init();
+extern void draw_cursor(int x, int y);
 
 void timer_handler() {
     ticks++;
@@ -47,6 +49,7 @@ struct idt_ptr idtp;
 
 extern void timer_isr();
 extern void keyboard_isr();
+extern void mouse_isr();
 extern void load_idt(struct idt_ptr *);
 
 void idt_set(unsigned char num, unsigned int base) {
@@ -65,6 +68,7 @@ void init_idt() {
     outb(0x21, 0x00); outb(0xA1, 0x00);
     idt_set(32, (unsigned int)timer_isr);
     idt_set(33, (unsigned int)keyboard_isr);
+    idt_set(44, (unsigned int)mouse_isr);  // IRQ12 = interrupt 44
     load_idt(&idtp);
 }
 
@@ -81,9 +85,11 @@ void kernel_main() {
     task_init();
     init_idt();
     init_timer();
+    mouse_init();
     __asm__ __volatile__("sti");
 
     draw_desktop();
+    draw_cursor(160, 100);
 
     while (1) {
         __asm__ __volatile__("hlt");
