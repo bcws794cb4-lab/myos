@@ -30,12 +30,15 @@ kernel/mouse.o: kernel/mouse.c
 kernel/net.o: kernel/net.c
 	x86_64-elf-gcc -m32 -ffreestanding -fno-stack-protector -nostdlib -c kernel/net.c -o kernel/net.o
 
-kernel/kernel.bin: kernel/entry.o kernel/interrupts.o kernel/kernel.o kernel/memory.o kernel/fs.o kernel/task.o kernel/gfx.o kernel/mouse.o kernel/net.o
-	x86_64-elf-ld -m elf_i386 -Ttext 0x8000 --oformat binary -o kernel/kernel.bin kernel/entry.o kernel/interrupts.o kernel/kernel.o kernel/memory.o kernel/fs.o kernel/task.o kernel/gfx.o kernel/mouse.o kernel/net.o
+kernel/arp.o: kernel/arp.c
+	x86_64-elf-gcc -m32 -ffreestanding -fno-stack-protector -nostdlib -c kernel/arp.c -o kernel/arp.o
+
+kernel/kernel.bin: kernel/entry.o kernel/interrupts.o kernel/kernel.o kernel/memory.o kernel/fs.o kernel/task.o kernel/gfx.o kernel/mouse.o kernel/net.o kernel/arp.o
+	x86_64-elf-ld -m elf_i386 -Ttext 0x8000 --oformat binary -o kernel/kernel.bin kernel/entry.o kernel/interrupts.o kernel/kernel.o kernel/memory.o kernel/fs.o kernel/task.o kernel/gfx.o kernel/mouse.o kernel/net.o kernel/arp.o
 
 myos.img: boot/boot.bin kernel/kernel.bin
 	cat boot/boot.bin kernel/kernel.bin > myos.img
 	truncate -s 2880k myos.img
 
 clean:
-	rm -f boot/boot.bin kernel/entry.o kernel/interrupts.o kernel/kernel.o kernel/memory.o kernel/fs.o kernel/task.o kernel/gfx.o kernel/mouse.o kernel/net.o kernel/kernel.bin myos.img
+	rm -f boot/boot.bin kernel/entry.o kernel/interrupts.o kernel/kernel.o kernel/memory.o kernel/fs.o kernel/task.o kernel/gfx.o kernel/mouse.o kernel/net.o kernel/arp.o kernel/kernel.bin myos.img
