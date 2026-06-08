@@ -1,5 +1,6 @@
 unsigned int ticks = 0;
 static int arp_sent = 0;
+static int arp_done = 0;
 
 static inline unsigned char inb(unsigned short port) {
     unsigned char val;
@@ -14,7 +15,6 @@ static inline void outb(unsigned short port, unsigned char val) {
 extern void mem_init();
 extern void fs_init();
 extern void task_init();
-extern void task_switch();
 extern void draw_desktop();
 extern void gfx_update_clock(unsigned int ticks);
 extern void draw_string(int x, int y, const char *str, unsigned char color, unsigned char bg);
@@ -29,41 +29,15 @@ extern unsigned char *arp_get_gateway_mac();
 extern void arp_handle(unsigned char *packet, unsigned short len);
 extern unsigned char *net_get_last_packet();
 extern unsigned short net_get_last_len();
+extern void net_poll();
 
 void timer_handler() {
     ticks++;
-    gfx_update_clock(ticks);
-
-    // Send ARP request after 1 second
+    // Just send ARP at tick 100, nothing else
     if (ticks == 100 && !arp_sent) {
-        arp_request(0x0A000202); // 10.0.2.2
+        arp_request(0x0A000202);
         arp_sent = 1;
     }
-
-    // Check for ARP reply
-    if (arp_sent && !arp_is_resolved()) {
-        unsigned short len = net_get_last_len();
-        if (len > 0) {
-            arp_handle(net_get_last_packet(), len);
-            if (arp_is_resolved()) {
-                unsigned char *gmac = arp_get_gateway_mac();
-                // Show gateway MAC on screen
-                fill_rect(60, 60, 200, 10, 19);
-                draw_string(60, 60, "GW MAC:", 10, 19);
-                // Show first 3 bytes
-                const char hex[] = "0123456789ABCDEF";
-                char m[3];
-                for (int i = 0; i < 6; i++) {
-                    m[0] = hex[(gmac[i]>>4)&0xF];
-                    m[1] = hex[gmac[i]&0xF];
-                    m[2] = 0;
-                    draw_string(100 + i*18, 60, m, 15, 19);
-                }
-            }
-        }
-    }
-
-    task_switch();
     outb(0x20, 0x20);
 }
 
@@ -120,6 +94,21 @@ void init_timer() {
     outb(0x40, (divisor >> 8) & 0xFF);
 }
 
+void show_gateway_mac() {
+    unsigned char *gmac = arp_get_gateway_mac();
+    char mac_str[18];
+    for (int i = 0; i < 6; i++) {
+        const char hex[] = "0123456789ABCDEF";
+        mac_str[i*3]   = hex[(gmac[i]>>4)&0xF];
+        mac_str[i*3+1] = hex[gmac[i]&0xF];
+        mac_str[i*3+2] = (i<5) ? ':' : 0;
+    }
+    fill_rect(0, 68, 320, 20, 19);
+    draw_string(4, 68, "GW MAC:", 10, 19);
+    draw_string(50, 68, mac_str, 15, 19);
+    draw_string(4, 78, "ARP OK! Gateway found!", 10, 19);
+}
+
 void kernel_main() {
     mem_init();
     fs_init();
@@ -132,15 +121,28 @@ void kernel_main() {
     draw_desktop();
 
     if (net_init()) {
-        draw_string(80, 50, "NET: RTL8139 OK!", 10, 19);
-        draw_string(80, 60, "Sending ARP...", 14, 19);
+        draw_string(60, 50, "NET: RTL8139 OK!", 10, 19);
+        draw_string(60, 60, "ARP will send in 1 second...", 14, 19);
     } else {
-        draw_string(80, 50, "NET: No card found", 12, 19);
+        draw_string(60, 50, "NET: No card found", 12, 19);
     }
 
     draw_cursor(160, 100);
 
+    // Main loop - poll network here instead of in timer
     while (1) {
         __asm__ __volatile__("hlt");
+
+        if (arp_sent && !arp_done) {
+            net_poll();
+            unsigned short len = net_get_last_len();
+            if (len > 0) {
+                arp_handle(net_get_last_packet(), len);
+                if (arp_is_resolved()) {
+                    arp_done = 1;
+                    show_gateway_mac();
+                }
+            }
+        }
     }
 }
